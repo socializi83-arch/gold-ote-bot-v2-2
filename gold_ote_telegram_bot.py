@@ -164,8 +164,8 @@ def bot_loop():
 # --- FIX RENDER : Flask + Bot en même temps ---
 import threading
 
-@app.route('/')
-def home():
+   @app.route('/', endpoint='home_main')
+   def home_main():
     return "Bot GOLD OTE 0.705 Running ✅"
 
 def start_bot():
