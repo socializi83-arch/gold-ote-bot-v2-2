@@ -160,12 +160,9 @@ def bot_loop():
         except Exception as e:
             print("Loop error:", e)
             time.sleep(10)
-
-# --- FIX RENDER : Flask + Bot en même temps ---
-import threading
-@app.route('/', endpoint='home_main')
-def home_main():
-    return "Bot GOLD OTE 0.705 Running ✅"
+            @app.route('/health')
+def health_check():
+    return "Bot GOLD OTE 0.70S Running ✅"
 
 def start_bot():
     try:
