@@ -146,24 +146,37 @@ def scan_tf(tf):
         print(f"Scan {tf} error: {e}")
 
 def bot_loop():
-    print("Bot GOLD OTE 0.705 5m/15m + Graphique démarré...")
+    print("Bot GOLD OTE 0.705 5m/15m + Graphique démarré")
     try:
-        send_telegram("✅ *Bot GOLD OTE 0.705 démarré*\nScan 5m + 15m + Graphique - UptimeRobot ON")
+        send_telegram("✅ *Bot GOLD OTE 0.705 démarré sur Render*")
     except:
         pass
     while True:
         try:
-            for tf in TIMEFRAMES: 
+            for tf in TIMEFRAMES:
                 scan_tf(tf)
                 time.sleep(2)
             time.sleep(5)
-        except Exception as e: 
+        except Exception as e:
             print("Loop error:", e)
             time.sleep(10)
 
-bot_thread = threading.Thread(target=bot_loop, daemon=True)
-bot_thread.start()
+# --- FIX RENDER : Flask + Bot en même temps ---
+import threading
 
-if __name__=="__main__":
-    port=int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+@app.route('/')
+def home():
+    return "Bot GOLD OTE 0.705 Running ✅"
+
+def start_bot():
+    try:
+        bot.remove_webhook()
+    except:
+        pass
+    bot_loop()
+
+if __name__ == "__main__":
+    threading.Thread(target=start_bot, daemon=True).start()
+    port = int(os.environ.get("PORT", 10000))
+    print(f"🌐 Flask sur port {port}")
+    app.run(host="0.0.0.0", port=port)
