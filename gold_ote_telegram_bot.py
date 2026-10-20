@@ -6,8 +6,8 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 from flask import Flask
 
-TELEGRAM_BOT_TOKEN = "8825722347:AAH_gIz-RTwjIbR0Rdmyh7PS_Hui5ktKWEQ"
-TELEGRAM_CHAT_ID = "1967933915"
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 TIMEFRAMES = ["5m", "15m"]
 SWING_LEN = 10
