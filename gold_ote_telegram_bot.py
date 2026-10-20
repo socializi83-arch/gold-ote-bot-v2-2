@@ -160,7 +160,7 @@ def bot_loop():
         except Exception as e:
             print("Loop error:", e)
             time.sleep(10)
-            @app.route('/health')
+@app.route('/health')
 def health_check():
     return "Bot GOLD OTE 0.70S Running ✅"
 
