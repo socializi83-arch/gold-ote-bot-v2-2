@@ -6,8 +6,8 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 from flask import Flask
 
-TELEGRAM_BOT_TOKEN = "8860580363:AAERmQTJU9daLNc183_5TQvi3a6S4uC6VuI"
-TELEGRAM_CHAT_ID = "1967933915"
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8825722347:AAH_gIz-RTwjIbR0Rdmyh7PS_Hui5ktKWEQ")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "1967933915")
 SYMBOL_YF = "GC=F"
 TIMEFRAMES = ["5m", "15m"]
 SWING_LEN = 10
@@ -99,4 +99,71 @@ def scan_tf(tf):
         df=df.dropna()
         df['EMA100']=ema(df['Close'], EMA_LEN)
         df['ATR']=atr(df, ATR_LEN)
-        lastHigh, lastHighIdx,
+        lastHigh, lastHighIdx, lastLow, lastLowIdx=find_last_swings(df)
+        if lastHigh is None or lastLow is None: return
+        rng=abs(lastHigh-lastLow)
+        ote705_L=lastLow+rng*FIB705
+        ote705_S=lastHigh-rng*FIB705
+        close=float(df['Close'].iloc[-1]); prevClose=float(df['Close'].iloc[-2])
+        ema_v=float(df['EMA100'].iloc[-1]); atr_val=float(df['ATR'].iloc[-1])
+        bearLeg=lastLowIdx>lastHighIdx; bullLeg=lastHighIdx>lastLowIdx
+        slLong=lastLow-atr_val*ATR_SL_MULT; tp1Long=lastHigh; tp2Long=lastHigh+rng*0.27
+        slShort=lastHigh+atr_val*ATR_SL_MULT; tp1Short=lastLow; tp2Short=lastLow-rng*0.27
+        key_base=f"{tf}_{lastHighIdx}_{lastLowIdx}"
+        if bearLeg and close>ema_v:
+            dist=abs(close-ote705_L)/close
+            if dist<ALERT_DISTANCE_PCT and close>ote705_L:
+                k=f"{key_base}_LONG_APPROACH"
+                if k not in last_alert or time.time()-last_alert[k]>900:
+                    send_telegram(f"⚠️ *GOLD {tf} - APPROCHE LONG OTE*\n\nNiveau 0.705: `{ote705_L:.2f}`\nActuel: `{close:.2f}`\nDistance: {dist*100:.2f}%\n\n👉 *Pose ton BUY LIMIT:*\nEntry: `{ote705_L:.2f}`\nSL: `{slLong:.2f}`\nTP1: `{tp1Long:.2f}` -> BE\nTP2: `{tp2Long:.2f}`")
+                    fig=generate_chart(df, tf, lastHigh, lastLow, ote705_L, slLong, tp1Long, tp2Long, "LONG", ema_v)
+                    send_telegram_photo(fig, f"📊 {tf} LONG Chart - Entry {ote705_L:.2f}")
+                    last_alert[k]=time.time()
+            if prevClose<=ote705_L and close>=ote705_L:
+                k=f"{key_base}_LONG_ENTRY"
+                if k not in last_alert or time.time()-last_alert[k]>1800:
+                    send_telegram(f"🎯 *GOLD {tf} - LONG 0.705 TOUCHÉ* `{ote705_L:.2f}`\nSL `{slLong:.2f}` TP1 `{tp1Long:.2f}` TP2 `{tp2Long:.2f}`")
+                    fig=generate_chart(df, tf, lastHigh, lastLow, ote705_L, slLong, tp1Long, tp2Long, "LONG", ema_v)
+                    send_telegram_photo(fig, f"🎯 {tf} LONG TOUCHE - {ote705_L:.2f}")
+                    last_alert[k]=time.time()
+        if bullLeg and close<ema_v:
+            dist=abs(close-ote705_S)/close
+            if dist<ALERT_DISTANCE_PCT and close<ote705_S:
+                k=f"{key_base}_SHORT_APPROACH"
+                if k not in last_alert or time.time()-last_alert[k]>900:
+                    send_telegram(f"⚠️ *GOLD {tf} - APPROCHE SHORT OTE*\n\nNiveau 0.705: `{ote705_S:.2f}`\nActuel: `{close:.2f}`\nDistance: {dist*100:.2f}%\n\n👉 *Pose ton SELL LIMIT:*\nEntry: `{ote705_S:.2f}`\nSL: `{slShort:.2f}`\nTP1: `{tp1Short:.2f}` -> BE\nTP2: `{tp2Short:.2f}`")
+                    fig=generate_chart(df, tf, lastHigh, lastLow, ote705_S, slShort, tp1Short, tp2Short, "SHORT", ema_v)
+                    send_telegram_photo(fig, f"📊 {tf} SHORT Chart - Entry {ote705_S:.2f}")
+                    last_alert[k]=time.time()
+            if prevClose>=ote705_S and close<=ote705_S:
+                k=f"{key_base}_SHORT_ENTRY"
+                if k not in last_alert or time.time()-last_alert[k]>1800:
+                    send_telegram(f"🎯 *GOLD {tf} - SHORT 0.705 TOUCHÉ* `{ote705_S:.2f}`\nSL `{slShort:.2f}` TP1 `{tp1Short:.2f}` TP2 `{tp2Short:.2f}`")
+                    fig=generate_chart(df, tf, lastHigh, lastLow, ote705_S, slShort, tp1Short, tp2Short, "SHORT", ema_v)
+                    send_telegram_photo(fig, f"🎯 {tf} SHORT TOUCHE - {ote705_S:.2f}")
+                    last_alert[k]=time.time()
+    except Exception as e: 
+        print(f"Scan {tf} error: {e}")
+
+def bot_loop():
+    print("Bot GOLD OTE 0.705 5m/15m + Graphique démarré...")
+    try:
+        send_telegram("✅ *Bot GOLD OTE 0.705 démarré*\nScan 5m + 15m + Graphique - UptimeRobot ON")
+    except:
+        pass
+    while True:
+        try:
+            for tf in TIMEFRAMES: 
+                scan_tf(tf)
+                time.sleep(2)
+            time.sleep(5)
+        except Exception as e: 
+            print("Loop error:", e)
+            time.sleep(10)
+
+bot_thread = threading.Thread(target=bot_loop, daemon=True)
+bot_thread.start()
+
+if __name__=="__main__":
+    port=int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
