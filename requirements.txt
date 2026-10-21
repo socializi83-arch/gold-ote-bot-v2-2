@@ -1,1 +1,7 @@
-[STRIPPED 71 bytes]
+pyTelegramBotAPI
+Flask
+yfinance
+matplotlib
+pandas
+requests
+numpy
