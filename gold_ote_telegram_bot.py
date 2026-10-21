@@ -3,7 +3,6 @@ import time
 import threading
 from datetime import datetime
 import io
-
 from flask import Flask
 import telebot
 import yfinance as yf
@@ -12,40 +11,30 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-# --- CONFIG ---
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "") or os.environ.get("TELEGRAM_BOT_TOKEN", "") or os.environ.get("TELEGRAM_TOKEN", "")
 CHAT_ID = os.environ.get("CHAT_ID", "") or os.environ.get("TELEGRAM_CHAT_ID", "")
-
 TIMEFRAMES = {"5m": "5m", "15m": "15m"}
-SYMBOL = "GC=F"  # Gold Futures
+SYMBOL = "GC=F"
 OTE_LOW = 0.62
 OTE_HIGH = 0.79
 
-print("BOT_TOKEN:", "YES" if BOT_TOKEN else "NO", len(BOT_TOKEN))
-print("CHAT_ID:", "YES" if CHAT_ID else "NO", str(CHAT_ID)[:6])
-
 bot = telebot.TeleBot(BOT_TOKEN) if BOT_TOKEN else None
 app = Flask(__name__)
+active_trades = {}
 
 @app.route('/')
 @app.route('/health')
 def health():
-    return f"Bot GOLD OTE 0.70S Running - {datetime.now().isoformat()}"
+    return f"Bot GOLD OTE BUY/SELL+BE Running - {datetime.now().isoformat()}"
 
 def send_msg(text, parse_mode="Markdown"):
     if not bot or not CHAT_ID:
-        print("No bot/chat")
         return
     try:
         chat = int(CHAT_ID) if str(CHAT_ID).lstrip('-').isdigit() else CHAT_ID
         bot.send_message(chat, text, parse_mode=parse_mode)
-        print("Sent msg:", text[:80])
     except Exception as e:
         print("Send error:", e)
-        try:
-            bot.send_message(chat, text)
-        except Exception as e2:
-            print("Send error2:", e2)
 
 def send_photo(img_bytes, caption=""):
     if not bot or not CHAT_ID:
@@ -53,7 +42,6 @@ def send_photo(img_bytes, caption=""):
     try:
         chat = int(CHAT_ID) if str(CHAT_ID).lstrip('-').isdigit() else CHAT_ID
         bot.send_photo(chat, img_bytes, caption=caption, parse_mode="Markdown")
-        print("Photo sent")
     except Exception as e:
         print("Photo error:", e)
 
@@ -63,7 +51,6 @@ def get_data(tf_yf, period="2d"):
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
         df = df.dropna()
-        print(f"Data {tf_yf}: {len(df)} candles, last {df['Close'].iloc[-1] if len(df)>0 else 'none'}")
         return df
     except Exception as e:
         print(f"YF error {tf_yf}:", e)
@@ -78,43 +65,46 @@ def find_swing(df, lookback=50):
     swing_high = float(recent.loc[high_idx, 'High'])
     swing_low = float(recent.loc[low_idx, 'Low'])
     is_bullish_leg = high_idx > low_idx
-    return {
-        "high": swing_high,
-        "low": swing_low,
-        "high_time": high_idx,
-        "low_time": low_idx,
-        "bullish": is_bullish_leg,
-        "df": recent
-    }
+    return {"high": swing_high, "low": swing_low, "bullish": is_bullish_leg, "df": recent}
 
 def compute_ote(swing):
-    h = swing["high"]
-    l = swing["low"]
-    rng = h - l
-    if swing["bullish"]:
-        ote_top = h - rng * OTE_LOW
-        ote_bot = h - rng * OTE_HIGH
-    else:
-        ote_top = l + rng * OTE_HIGH
-        ote_bot = l + rng * OTE_LOW
-    ote_top, ote_bot = max(ote_top, ote_bot), min(ote_top, ote_bot)
+    h = swing["high"]; l = swing["low"]; rng = h - l
     lower = min(h - rng*OTE_LOW, h - rng*OTE_HIGH) if swing["bullish"] else min(l + rng*OTE_LOW, l + rng*OTE_HIGH)
     upper = max(h - rng*OTE_LOW, h - rng*OTE_HIGH) if swing["bullish"] else max(l + rng*OTE_LOW, l + rng*OTE_HIGH)
     return lower, upper, rng
 
-def make_chart(df, swing, tf_label):
+def calc_levels(swing):
+    h = swing["high"]; l = swing["low"]; rng = h - l
+    lower, upper, _ = compute_ote(swing)
+    entry = (lower + upper) / 2
+    if swing["bullish"]:
+        sl = l - rng * 0.15
+        tp1 = h
+        tp2 = h + rng * 0.62
+        tp3 = h + rng * 1.0
+    else:
+        sl = h + rng * 0.15
+        tp1 = l
+        tp2 = l - rng * 0.62
+        tp3 = l - rng * 1.0
+    return lower, upper, entry, sl, tp1, tp2, tp3, rng
+
+def make_chart(df, swing, tf_label, entry, sl, tp1, tp2):
     lower, upper, rng = compute_ote(swing)
     last_price = float(df['Close'].iloc[-1])
-    plt.figure(figsize=(10,5))
-    plt.plot(df.index, df['Close'], label='GOLD Close', linewidth=1.2)
-    plt.axhline(swing["high"], color='green', linestyle='--', alpha=0.6, label=f'Swing High {swing["high"]:.1f}')
-    plt.axhline(swing["low"], color='red', linestyle='--', alpha=0.6, label=f'Swing Low {swing["low"]:.1f}')
+    plt.figure(figsize=(11,5.5))
+    plt.plot(df.index, df['Close'], label='GOLD', linewidth=1.3)
+    plt.axhline(swing["high"], color='green', linestyle='--', alpha=0.5)
+    plt.axhline(swing["low"], color='red', linestyle='--', alpha=0.5)
     plt.axhspan(lower, upper, color='gold', alpha=0.35, label=f'OTE {OTE_LOW}-{OTE_HIGH}')
+    plt.axhline(entry, color='blue', linestyle='-', linewidth=1.5, label=f'ENTRY {entry:.1f}')
+    plt.axhline(sl, color='red', linestyle='-', linewidth=1.2, label=f'SL {sl:.1f}')
+    plt.axhline(tp1, color='limegreen', linestyle='-', linewidth=1.2, label=f'TP1 {tp1:.1f}')
+    plt.axhline(tp2, color='darkgreen', linestyle='-', alpha=0.7, label=f'TP2 {tp2:.1f}')
     plt.scatter([df.index[-1]], [last_price], color='black', zorder=5)
-    plt.text(df.index[-1], last_price, f' {last_price:.1f}', fontsize=9, va='bottom')
-    direction = "BULLISH LEG (retest long)" if swing["bullish"] else "BEARISH LEG (retest short)"
-    plt.title(f'GOLD {tf_label} - {direction} | OTE {lower:.1f} - {upper:.1f}')
-    plt.legend(fontsize=8)
+    direction = "LONG BUY" if swing["bullish"] else "SHORT SELL"
+    plt.title(f'GOLD {tf_label} - {direction} | OTE {lower:.1f}-{upper:.1f} Entry {entry:.1f}')
+    plt.legend(fontsize=7)
     plt.grid(alpha=0.2)
     plt.tight_layout()
     buf = io.BytesIO()
@@ -128,33 +118,86 @@ def scan_tf(tf_key):
     period = "1d" if tf_key=="5m" else "5d"
     df = get_data(tf_yf, period=period)
     if df.empty or len(df) < 40:
-        print(f"{tf_key} not enough data")
         return
     swing = find_swing(df, lookback=50)
     if not swing:
         return
-    buf, lower, upper, last = make_chart(swing["df"], swing, tf_key)
+    lower, upper, entry, sl, tp1, tp2, tp3, rng = calc_levels(swing)
+    buf, _, _, last = make_chart(swing["df"], swing, tf_key, entry, sl, tp1, tp2)
     in_ote = lower <= last <= upper
-    direction = "BULLISH" if swing["bullish"] else "BEARISH"
+    if swing["bullish"]:
+        direction = "LONG 📈 BUY"
+        order_type = "🟢 BUY / LONG - ACHAT"
+        action = "BUY"
+    else:
+        direction = "SHORT 📉 SELL"
+        order_type = "🔴 SELL / SHORT - VENTE"
+        action = "SELL"
+    rr1 = abs(tp1-entry)/abs(entry-sl) if abs(entry-sl)>0 else 0
+    rr2 = abs(tp2-entry)/abs(entry-sl) if abs(entry-sl)>0 else 0
+
+    if tf_key in active_trades:
+        tr = active_trades[tf_key]
+        is_long = tr["bullish"]
+        tp1_hit = (last >= tr["tp1"]) if is_long else (last <= tr["tp1"])
+        if tp1_hit and not tr.get("be_done"):
+            be_msg = (
+                f"✅ *TP1 TOUCHÉ {tf_key} - PASSE EN BE* ✅\n\n"
+                f"Direction: {tr['direction']}\n"
+                f"Entrée: `{tr['entry']:.2f}`\n"
+                f"TP1 `{tr['tp1']:.2f}` validé 🟢\n\n"
+                f"👉 *ACTION:*\n"
+                f"SL: `{tr['sl']:.2f}` ➡️ `{tr['entry']:.2f}`\n\n"
+                f"`{tr['entry']:.2f}`\n"
+                f"☝️ COPIE CE CHIFFRE DANS SL\n\n"
+                f"Objectif TP2: `{tr['tp2']:.2f}`"
+            )
+            send_msg(be_msg)
+            tr["be_done"] = True
+            active_trades[tf_key] = tr
+        tp2_hit = (last >= tr["tp2"]) if is_long else (last <= tr["tp2"])
+        if tp2_hit and tr.get("be_done") and not tr.get("tp2_done"):
+            tp2_msg = (
+                f"🔥 *TP2 TOUCHÉ {tf_key} - SECURISE BE+* 🔥\n\n"
+                f"`{tr['entry']:.2f}` -> `{tr['tp2']:.2f}`\n"
+                f"TP2 validé\n\n"
+                f"👉 Passe SL en BE+: `{tr['tp1']:.2f}`\n\n"
+                f"`{tr['tp1']:.2f}`\n"
+                f"☝️ COPIE POUR TP3 `{tr['tp3']:.2f}`"
+            )
+            send_msg(tp2_msg)
+            tr["tp2_done"] = True
+            active_trades[tf_key] = tr
+
     caption = (
-        f"*{tf_key} | GOLD OTE 0.70S*\n"
-        f"Leg: {direction} {swing['low']:.1f} -> {swing['high']:.1f}\n"
-        f"OTE Zone: `{lower:.2f} - {upper:.2f}`\n"
-        f"Price: `{last:.2f}` {'🟢 DANS OTE' if in_ote else '⚪ Hors OTE'}\n"
-        f"Range: {swing['high']-swing['low']:.2f}\n"
-        f"{datetime.now().strftime('%H:%M:%S')}"
+        f"🚨 *{tf_key} SIGNAL OTE {direction}* 🚨\n"
+        f"{order_type}\n\n"
+        f"Leg: {swing['low']:.1f} -> {swing['high']:.1f} (Range {rng:.1f}$)\n"
+        f"OTE: `{lower:.2f} - {upper:.2f}` | Prix: `{last:.2f}` {'🟢 DANS OTE' if in_ote else '⚪ Hors OTE'}\n\n"
+        f"🎯 *PLAN ICT:*\n"
+        f"➡️ ORDRE: *{action}*\n"
+        f"➡️ ENTRÉE: `{entry:.2f}` (0.705S)\n"
+        f"🛑 SL: `{sl:.2f}` ({abs(entry-sl):.1f}$)\n"
+        f"✅ TP1: `{tp1:.2f}` (Swing) RR {rr1:.1f}R\n"
+        f"✅ TP2: `{tp2:.2f}` RR {rr2:.1f}R\n"
+        f"✅ TP3: `{tp3:.2f}` (Ext 1.0)\n"
+        f"_{datetime.now().strftime('%H:%M:%S')}_"
     )
     if in_ote:
-        caption = "🚨 *" + f"{tf_key} SIGNAL OTE" + "* 🚨\n" + caption
         send_photo(buf, caption)
+        active_trades[tf_key] = {
+            "entry": entry, "sl": sl, "tp1": tp1, "tp2": tp2, "tp3": tp3,
+            "direction": direction, "bullish": swing["bullish"],
+            "be_done": False, "tp2_done": False
+        }
     else:
-        print(f"{tf_key} hors OTE {lower:.1f}-{upper:.1f} price {last:.1f}")
+        print(f"{tf_key} hors OTE")
     buf.close()
 
 def bot_loop():
-    print("Bot GOLD OTE 0.70S 5m/15m + Graphique pret")
-    time.sleep(3)
-    send_msg("✅ *Bot GOLD OTE 0.70S demarre*\nScan 5m + 15m + Graphique\nSignal uniquement si prix dans OTE 0.62-0.79")
+    print("Bot GOLD OTE BUY/SELL + BE pret")
+    time.sleep(2)
+    send_msg("✅ *Bot GOLD OTE BUY/SELL + BE demarre*\n🎯 BUY/SELL + ENTRÉE / SL / TP1-TP3 + Alerte BE\nTP1 touché = chiffre BE à copier")
     last_full_send = 0
     while True:
         try:
@@ -167,8 +210,9 @@ def bot_loop():
                     if not df5.empty:
                         swing = find_swing(df5, 50)
                         if swing:
-                            buf, lower, upper, last = make_chart(swing["df"], swing, "5m")
-                            send_photo(buf, f"*Recap 5m* Prix {last:.1f} OTE {lower:.1f}-{upper:.1f} - Bot OK")
+                            lower, upper, entry, sl, tp1, tp2, tp3, rng = calc_levels(swing)
+                            buf, _, _, last = make_chart(swing["df"], swing, "5m", entry, sl, tp1, tp2)
+                            send_photo(buf, f"*Recap 5m* Prix {last:.1f} | Entrée {entry:.1f} SL {sl:.1f} TP1 {tp1:.1f}")
                             buf.close()
                 except Exception as e:
                     print("Recap error", e)
@@ -182,13 +226,11 @@ def start_bot():
     try:
         if bot:
             bot.remove_webhook()
-            print("Webhook removed")
-    except Exception as e:
-        print("Webhook error", e)
+    except:
+        pass
     bot_loop()
 
 if __name__ == "__main__":
     threading.Thread(target=start_bot, daemon=True).start()
     port = int(os.environ.get("PORT", 10000))
-    print(f"Flask on port {port}")
     app.run(host="0.0.0.0", port=port)
