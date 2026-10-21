@@ -26,7 +26,7 @@ last_signals = {}
 @app.route('/')
 @app.route('/health')
 def health():
-    return f"Bot GOLD OTE BUY/SELL+BE Running - {datetime.now().isoformat()}"
+    return f"Bot GOLD OTE V3.1 - {datetime.now().isoformat()} - AntiSpam 1h - Last:{last_signals}"
 
 def send_msg(text, parse_mode="Markdown"):
     if not bot or not CHAT_ID:
@@ -46,7 +46,7 @@ def send_photo(img_bytes, caption=""):
     except Exception as e:
         print("Photo error:", e)
 
-def get_data(tf_yf, period="2d"):
+def get_data(tf_yf, period="5d"):
     try:
         df = yf.download(SYMBOL, period=period, interval=tf_yf, auto_adjust=True, progress=False)
         if isinstance(df.columns, pd.MultiIndex):
@@ -57,7 +57,7 @@ def get_data(tf_yf, period="2d"):
         print(f"YF error {tf_yf}:", e)
         return pd.DataFrame()
 
-def find_swing(df, lookback=50):
+def find_swing(df, lookback=80):
     if len(df) < lookback:
         return None
     recent = df.tail(lookback)
@@ -116,11 +116,10 @@ def make_chart(df, swing, tf_label, entry, sl, tp1, tp2):
 
 def scan_tf(tf_key):
     tf_yf = TIMEFRAMES[tf_key]
-    period = "1d" if tf_key=="5m" else "5d"
-    df = get_data(tf_yf, period=period)
-    if df.empty or len(df) < 40:
+    df = get_data(tf_yf, period="5d")
+    if df.empty or len(df) < 80:
         return
-    swing = find_swing(df, lookback=50)
+    swing = find_swing(df, lookback=80)
     if not swing:
         return
     lower, upper, entry, sl, tp1, tp2, tp3, rng = calc_levels(swing)
@@ -187,23 +186,55 @@ def scan_tf(tf_key):
     if in_ote:
         now = time.time()
         prev = last_signals.get(tf_key)
-        if prev and abs(prev["entry"] - entry) < 2.0 and (now - prev["time"]) < 900:
-            print(f"{tf_key} déjà signalé il y a {(now-prev['time'])/60:.1f}min - skip")
-            buf.close()
-            return
+        if prev:
+            same_dir = prev.get("bullish") == swing["bullish"]
+            entry_close = abs(prev["entry"] - entry) < 3.0
+            time_close = (now - prev["time"]) < 3600
+            if same_dir and entry_close and time_close:
+                print(f"{tf_key} SKIP même swing {prev['entry']:.1f} déjà envoyé il y a {(now-prev['time'])/60:.1f}min")
+                buf.close()
+                return
+            if tf_key in active_trades and same_dir and entry_close:
+                if not active_trades[tf_key].get("be_done"):
+                    print(f"{tf_key} SKIP trade actif encore valide")
+                    buf.close()
+                    return
+
         send_photo(buf, caption)
-        last_signals[tf_key] = {"entry": entry, "time": now}
-        if tf_key not in active_trades or abs(active_trades[tf_key]["entry"] - entry) > 2.0:
+        last_signals[tf_key] = {"entry": entry, "time": now, "bullish": swing["bullish"]}
+        if tf_key not in active_trades or abs(active_trades[tf_key]["entry"] - entry) > 3.0 or active_trades[tf_key]["bullish"] != swing["bullish"]:
             active_trades[tf_key] = {
                 "entry": entry, "sl": sl, "tp1": tp1, "tp2": tp2, "tp3": tp3,
                 "direction": direction, "bullish": swing["bullish"],
                 "be_done": False, "tp2_done": False
             }
     else:
-        print(f"{tf_key} hors OTE")
+        print(f"{tf_key} hors OTE {last:.1f}")
     buf.close()
 
 def bot_loop():
-    print("Bot GOLD OTE BUY/SELL + BE pret")
+    print("Bot GOLD OTE V3.1 AntiSpam 1h pret")
     time.sleep(2)
-   
+    send_msg("✅ *Bot V3.1 demarre*\n🚫 1 signal max par heure / swing\n🎯 BUY/SELL + BE auto")
+    while True:
+        try:
+            for tf in TIMEFRAMES:
+                scan_tf(tf)
+                time.sleep(5)
+            time.sleep(90)
+        except Exception as e:
+            print("Loop error:", e)
+            time.sleep(30)
+
+def start_bot():
+    try:
+        if bot:
+            bot.remove_webhook()
+    except:
+        pass
+    bot_loop()
+
+if __name__ == "__main__":
+    threading.Thread(target=start_bot, daemon=True).start()
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
