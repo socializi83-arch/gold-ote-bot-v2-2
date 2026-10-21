@@ -151,15 +151,15 @@ def bot_loop():
         send_telegram("✅ *Bot GOLD OTE 0.705 démarré sur Render*")
     except:
         pass
-    while True:
+        while True:
         try:
             for tf in TIMEFRAMES:
                 scan_tf(tf)
                 time.sleep(2)
             time.sleep(5)
-     except Exception as e:
+        except Exception as e:
             print(f"Loop error: {e}")
-        time.sleep(10)
+            time.sleep(10)
 
 def start_bot():
     try:
