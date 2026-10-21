@@ -21,6 +21,7 @@ OTE_HIGH = 0.79
 bot = telebot.TeleBot(BOT_TOKEN) if BOT_TOKEN else None
 app = Flask(__name__)
 active_trades = {}
+last_signals = {}
 
 @app.route('/')
 @app.route('/health')
@@ -184,12 +185,20 @@ def scan_tf(tf_key):
         f"_{datetime.now().strftime('%H:%M:%S')}_"
     )
     if in_ote:
+        now = time.time()
+        prev = last_signals.get(tf_key)
+        if prev and abs(prev["entry"] - entry) < 2.0 and (now - prev["time"]) < 900:
+            print(f"{tf_key} déjà signalé il y a {(now-prev['time'])/60:.1f}min - skip")
+            buf.close()
+            return
         send_photo(buf, caption)
-        active_trades[tf_key] = {
-            "entry": entry, "sl": sl, "tp1": tp1, "tp2": tp2, "tp3": tp3,
-            "direction": direction, "bullish": swing["bullish"],
-            "be_done": False, "tp2_done": False
-        }
+        last_signals[tf_key] = {"entry": entry, "time": now}
+        if tf_key not in active_trades or abs(active_trades[tf_key]["entry"] - entry) > 2.0:
+            active_trades[tf_key] = {
+                "entry": entry, "sl": sl, "tp1": tp1, "tp2": tp2, "tp3": tp3,
+                "direction": direction, "bullish": swing["bullish"],
+                "be_done": False, "tp2_done": False
+            }
     else:
         print(f"{tf_key} hors OTE")
     buf.close()
@@ -197,40 +206,4 @@ def scan_tf(tf_key):
 def bot_loop():
     print("Bot GOLD OTE BUY/SELL + BE pret")
     time.sleep(2)
-    send_msg("✅ *Bot GOLD OTE BUY/SELL + BE demarre*\n🎯 BUY/SELL + ENTRÉE / SL / TP1-TP3 + Alerte BE\nTP1 touché = chiffre BE à copier")
-    last_full_send = 0
-    while True:
-        try:
-            for tf in TIMEFRAMES:
-                scan_tf(tf)
-                time.sleep(3)
-            if time.time() - last_full_send > 3600:
-                try:
-                    df5 = get_data("5m", period="1d")
-                    if not df5.empty:
-                        swing = find_swing(df5, 50)
-                        if swing:
-                            lower, upper, entry, sl, tp1, tp2, tp3, rng = calc_levels(swing)
-                            buf, _, _, last = make_chart(swing["df"], swing, "5m", entry, sl, tp1, tp2)
-                            send_photo(buf, f"*Recap 5m* Prix {last:.1f} | Entrée {entry:.1f} SL {sl:.1f} TP1 {tp1:.1f}")
-                            buf.close()
-                except Exception as e:
-                    print("Recap error", e)
-                last_full_send = time.time()
-            time.sleep(60)
-        except Exception as e:
-            print("Loop error:", e)
-            time.sleep(30)
-
-def start_bot():
-    try:
-        if bot:
-            bot.remove_webhook()
-    except:
-        pass
-    bot_loop()
-
-if __name__ == "__main__":
-    threading.Thread(target=start_bot, daemon=True).start()
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+   
