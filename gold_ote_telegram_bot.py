@@ -157,7 +157,8 @@ def bot_loop():
                 scan_tf(tf)
                 time.sleep(2)
             time.sleep(5)
-        print("Loop error...")
+     except Exception as e:
+            print(f"Loop error: {e}")
         time.sleep(10)
 
 def start_bot():
