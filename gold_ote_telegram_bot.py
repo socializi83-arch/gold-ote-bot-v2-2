@@ -157,12 +157,8 @@ def bot_loop():
                 scan_tf(tf)
                 time.sleep(2)
             time.sleep(5)
-        except Exception as e:
-            print("Loop error:", e)
-            time.sleep(10)
-@app.route('/health')
-def health_check():
-    return "Bot GOLD OTE 0.70S Running ✅"
+        print("Loop error...")
+        time.sleep(10)
 
 def start_bot():
     try:
